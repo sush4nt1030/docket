@@ -1,0 +1,53 @@
+name: Build Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the android folder
+        run: |
+          DIR=$(dirname "$(find . -path '*android/gradlew' -not -path '*/node_modules/*' | head -n 1)")
+          if [ -z "$DIR" ] || [ "$DIR" = "." ]; then echo "Could not find android/gradlew in the repository"; exit 1; fi
+          echo "Android project: $DIR"
+          echo "ANDROID_DIR=$DIR" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Use your signing key (optional, from repository secrets)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.DOCKET_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/docket.jks"
+            echo "DOCKET_KEYSTORE=$RUNNER_TEMP/docket.jks" >> "$GITHUB_ENV"
+          else
+            echo "No DOCKET_KEYSTORE_BASE64 secret: signing with a temporary debug key."
+          fi
+
+      - name: Build APK
+        env:
+          DOCKET_KEYSTORE_PASSWORD: ${{ secrets.DOCKET_KEYSTORE_PASSWORD }}
+        run: |
+          cd "$ANDROID_DIR"
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/docket.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docket-android-apk
+          path: docket.apk
+          if-no-files-found: error
